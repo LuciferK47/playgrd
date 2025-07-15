@@ -1,16 +1,9 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import accuracy_score
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
-from sklearn.svm import SVC
-from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier
-import numpy as np
-import time
 
 # Load data
 train_df = pd.read_csv('train.csv')
@@ -24,6 +17,7 @@ test_ids = test_df['id']
 X = train_df.drop(['id', 'Personality'], axis=1)
 y = train_df['Personality']
 test_df = test_df.drop('id', axis=1)
+
 
 # Encode target variable
 le = LabelEncoder()
@@ -54,87 +48,30 @@ scaler = StandardScaler()
 X[numerical_features] = scaler.fit_transform(X[numerical_features])
 test_df[numerical_features] = scaler.transform(test_df[numerical_features])
 
-# Create some new features
-X['social_score'] = X['Social_event_attendance'] * X['Going_outside']
-X['friend_post_ratio'] = X['Friends_circle_size'] / (X['Post_frequency'] + 1)
-test_df['social_score'] = test_df['Social_event_attendance'] * test_df['Going_outside']
-test_df['friend_post_ratio'] = test_df['Friends_circle_size'] / (test_df['Post_frequency'] + 1)
-
 # Split data for validation
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-# Define models and hyperparameter spaces
-models = {
-    'Random Forest': {
-        'model': RandomForestClassifier(random_state=42),
-        'params': {
-            'n_estimators': [200, 300, 400],
-            'max_depth': [5, 10, 15],
-            'min_samples_split': [2, 5, 10],
-            'min_samples_leaf': [1, 2, 4]
-        }
-    },
-    'Gradient Boosting': {
-        'model': GradientBoostingClassifier(random_state=42),
-        'params': {
-            'n_estimators': [200, 300],
-            'learning_rate': [0.05, 0.1, 0.2],
-            'max_depth': [3, 4, 5],
-            'subsample': [0.8, 1.0],
-            'colsample_bytree': [0.8, 1.0]
-        }
-    },
-    'XGBoost': {
-        'model': XGBClassifier(random_state=42, use_label_encoder=False),
-        'params': {
-            'n_estimators': [200, 300],
-            'learning_rate': [0.05, 0.1],
-            'max_depth': [3, 4],
-            'subsample': [0.8, 1.0],
-            'colsample_bytree': [0.8, 1.0]
-        }
-    }
+# Model Training with Gradient Boosting and Hyperparameter Tuning
+param_grid = {
+    'n_estimators': [200, 300],
+    'learning_rate': [0.05, 0.1],
+    'max_depth': [3, 4]
 }
 
-# Perform Randomized Search for each model
-best_models = {}
-for name, config in models.items():
-    print(f"\nPerforming Randomized Search for {name}")
-    start_time = time.time()
-    n_iter = 10
-    random_search = RandomizedSearchCV(
-        estimator=config['model'],
-        param_distributions=config['params'],
-        cv=3,
-        n_iter=n_iter,
-        random_state=42,
-        scoring='accuracy',
-        verbose=2,
-        n_jobs=-1
-    )
-    random_search.fit(X_train, y_train)
-    
-    best_models[name] = random_search.best_estimator_
-    print(f"Best Parameters for {name}: {random_search.best_params_}")
-    print(f"Best Accuracy for {name}: {random_search.best_score_}")
-    print(f"Time taken: {time.time() - start_time} seconds")
+gb_model = GradientBoostingClassifier(random_state=42)
+grid_search = GridSearchCV(estimator=gb_model, param_grid=param_grid, cv=3, n_jobs=-1, verbose=2, scoring='accuracy')
+grid_search.fit(X_train, y_train)
 
-# Validate each best model on validation set
-validation_results = {}
-for name, model in best_models.items():
-    y_pred = model.predict(X_val)
-    accuracy = accuracy_score(y_val, y_pred)
-    validation_results[name] = accuracy
-    print(f"Validation Accuracy for {name}: {accuracy}")
+print(f"Best parameters found: {grid_search.best_params_}")
+best_model = grid_search.best_estimator_
 
-# Select the best performing model
-best_model_name = max(validation_results, key=validation_results.get)
-best_model = best_models[best_model_name]
+# Validation
+y_pred_val = best_model.predict(X_val)
+accuracy = accuracy_score(y_val, y_pred_val)
+print(f'Validation Accuracy: {accuracy}')
 
-# Train the best model on full data
+# Train on full data and predict on test data
 best_model.fit(X, y)
-
-# Make predictions on test data
 test_predictions = best_model.predict(test_df)
 
 # Inverse transform predictions to original labels
